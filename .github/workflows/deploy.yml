@@ -26,21 +26,26 @@ jobs:
 
       - name: Derrubar a topologia antiga
         run: |
-          # Remove os containers caso já existam; || true evita erro se não existirem
-          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker rm -f front || true
-          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker rm -f api || true
-          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker rm -f banco || true
+          # 1. Para os containers caso estejam rodando
+          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker stop front || true
+          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker stop api || true
+          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker stop banco || true
+
+          # 2. Remove os containers (sem -f para respeitar o wrapper)
+          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker rm front || true
+          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker rm api || true
+          ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker rm banco || true
 
       - name: Criar rede e volume
         run: |
-          # Cria o volume e as duas redes se não existirem (preservando o volume se já existir)
+          # Cria o volume e as duas redes se não existirem
           ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker volume create pgdata || true
           ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker network create dados --interna || true
           ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker network create web || true
 
       - name: Subir banco, API e front
         run: |
-          # 1. Banco (rede interna, volume montado, sem porta exposta)
+          # 1. Banco (rede interna, volume pgdata montado)
           ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker run -d \
             --name banco \
             --network dados \
@@ -49,7 +54,7 @@ jobs:
             -e POSTGRES_PASSWORD=${{ secrets.DB_SENHA }} \
             postgres:17-alpine
 
-          # 2. API (rede dados + conectada à web, sem porta exposta)
+          # 2. API (rede dados + conectada à web)
           ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker run -d \
             --name api \
             --network dados \
@@ -60,7 +65,7 @@ jobs:
 
           ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker network connect web api
 
-          # 3. Front (rede web, porta publicada e com o commit sha atual)
+          # 3. Front (rede web, porta publicada e commit SHA)
           ssh -i ~/.ssh/deploy gr-${{ env.SLUG }}@gr.lab.ayty.org gr-docker run -d \
             --name front \
             --network web \
@@ -71,6 +76,5 @@ jobs:
 
       - name: Conferir que subiu
         run: |
-          # Aguarda a API e o banco subirem e testa a rota pelo front
           sleep 10
           curl --fail --retry 10 --retry-delay 3 --retry-connrefused http://gr.lab.ayty.org:${{ env.PORTA }}
